@@ -4,6 +4,11 @@ import pyaudio
 from dotenv import load_dotenv
 import os
 
+# 測試 function calling 用的函式
+from lib.city import get_current_city_name
+from lib.weather import get_feels_like_celsius
+from google.genai import types
+
 # 載入環境變數
 load_dotenv()
 
@@ -29,7 +34,13 @@ CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文以及台灣慣用詞語回答。",
     "output_audio_transcription": {}, # 取得 GenAI 的音訊輸出轉文字
-    "input_audio_transcription": {},  # 取得使用者音訊輸入轉文字
+    "input_audio_transcription": {},  # 取得使用者音訊輸入轉文字,
+    # 可以直接傳入函式，但 Live API 不支援自動叫用函式
+    # 至少省掉建立函式宣告物件的麻煩，但仍需要手動叫用
+    "tools": [
+        get_current_city_name,
+        get_feels_like_celsius,
+        types.Tool(google_search=types.GoogleSearch())    ],
 }
 
 audio_queue_output = asyncio.Queue()
@@ -80,6 +91,24 @@ async def receive_audio(session):
         turn = session.receive()
         audio_input = None
         async for response in turn:
+            if response.tool_call:
+                fn_responses = []
+                # Live API 不支援自動叫用函式，因此需要手動叫用
+                for fn in response.tool_call.function_calls:
+                    fn_name = fn.name
+                    fn_args = fn.args
+                    print(f"{fn_name}(**{fn_args})")
+                    fn_responses.append(genai.types.FunctionResponse(
+                        id=fn.id,
+                        name=fn_name,
+                        response={
+                            "result": eval(f"{fn_name}(**{fn_args})"),
+                        },
+                    ))
+                await session.send_tool_response(
+                    function_responses=fn_responses,
+                )
+                continue
             content = response.server_content
             if not content:
                 continue

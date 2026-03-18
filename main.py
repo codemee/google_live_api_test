@@ -12,12 +12,7 @@ from google.genai import types
 # 載入環境變數
 load_dotenv()
 
-# 從環境變數讀取 Gemini API key
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    raise ValueError("請設定 GEMINI_API_KEY 環境變數或在 .env 檔案中設定")
-
-client = genai.Client(api_key=api_key)
+client = genai.Client()
 
 # --- pyaudio config ---
 FORMAT = pyaudio.paInt16
@@ -40,7 +35,8 @@ CONFIG = {
     "tools": [
         get_current_city_name,
         get_feels_like_celsius,
-        types.Tool(google_search=types.GoogleSearch())    ],
+        types.Tool(google_search=types.GoogleSearch())
+    ],
 }
 
 audio_queue_output = asyncio.Queue()
@@ -128,9 +124,8 @@ async def receive_audio(session):
                 print("\n", end="", flush=True)
 
         # 如果有新的音訊輸入就清空播放佇列停止播放尚未播完的音訊
-        if audio_input:
-            while not audio_queue_output.empty():
-                audio_queue_output.get_nowait()
+        if not audio_queue_mic.empty():
+            audio_queue_output.clear()
 
 async def play_audio():
     """從播放佇列取出音訊資料播放"""

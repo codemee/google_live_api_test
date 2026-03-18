@@ -14,7 +14,7 @@ load_dotenv()
 
 client = genai.Client()
 
-# --- pyaudio config ---
+# 麥克風輸入的音訊格式
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 SEND_SAMPLE_RATE = 16000
@@ -23,7 +23,7 @@ CHUNK_SIZE = 1024
 
 pya = pyaudio.PyAudio()
 
-# --- Live API config ---
+# Live API 的設定
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 CONFIG = {
     "response_modalities": ["AUDIO"],
@@ -108,6 +108,13 @@ async def receive_audio(session):
             content = response.server_content
             if not content:
                 continue
+
+            # 使用者插話，清空播放佇列中斷播放
+            if content.interrupted is True:
+                while not audio_queue_output.empty():
+                    audio_queue_output.get_nowait()
+                break
+
             if content.model_turn:
                 # 遍歷音訊資料的每一個部分並推入播放佇列
                 for part in content.model_turn.parts:
@@ -124,8 +131,10 @@ async def receive_audio(session):
                 print("\n", end="", flush=True)
 
         # 如果有新的音訊輸入就清空播放佇列停止播放尚未播完的音訊
-        if not audio_queue_mic.empty():
-            audio_queue_output.clear()
+        # if not audio_queue_mic.empty():
+        #     await session.send_realtime_input(audio_stream_end=True)
+        #     while not audio_queue_output.empty():
+        #         audio_queue_output.get_nowait()
 
 async def play_audio():
     """從播放佇列取出音訊資料播放"""

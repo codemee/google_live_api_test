@@ -24,7 +24,7 @@ def get_feels_like_celsius(city: str):
         data = response.json()
 
         # 根據 wttr.in 的 JSON 結構，體感溫度通常在 current_condition[0] 之下
-        feels_like_c = data['current_condition'][0]['FeelsLikeC']
+        feels_like_c = data['data']['current_condition'][0]['FeelsLikeC']
         return feels_like_c
     except requests.exceptions.RequestException as e:
         return f"獲取天氣資料時發生錯誤: {e}"

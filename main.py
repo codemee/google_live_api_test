@@ -83,10 +83,12 @@ async def send_realtime(session):
 
 async def receive_audio(session):
     """從 GenAI 收取音訊資料推入播放佇列"""
+    text = ""
     while True:
         turn = session.receive()
         audio_input = None
         async for response in turn:
+            # print(response.voice_activity_detection_signal) # 都是 None
             if response.tool_call:
                 fn_responses = []
                 # Live API 不支援自動叫用函式，因此需要手動叫用
@@ -124,17 +126,19 @@ async def receive_audio(session):
                         audio_input = part.inline_data.data
                         audio_queue_output.put_nowait(audio_input)
             elif content.output_transcription: # 收到 GenAI 音訊輸出轉文字
+                if text == "":
+                    print("\n")
+                text += content.output_transcription.text
                 print(f"{content.output_transcription.text}", end="", flush=True)
+                # if content.output_transcription.finished: # 都是 None
+                #     print("\n\n> ", end="",flush=True)
             elif content.input_transcription: # 收到使用者音訊輸入轉文字
-                print(f"<-: {content.input_transcription.text}\n->:", end="", flush=True)
+                print(content.input_transcription.text, end="", flush=True)
+                # if content.input_transcription.finished: # 都是 None
+                #     print("", flush=True)
             if content.generation_complete or content.interrupted:
-                print("\n", end="", flush=True)
-
-        # 如果有新的音訊輸入就清空播放佇列停止播放尚未播完的音訊
-        # if not audio_queue_mic.empty():
-        #     await session.send_realtime_input(audio_stream_end=True)
-        #     while not audio_queue_output.empty():
-        #         audio_queue_output.get_nowait()
+                print("\n\n> ", end="", flush=True)
+                text = ""
 
 async def play_audio():
     """從播放佇列取出音訊資料播放"""
@@ -156,7 +160,7 @@ async def run():
         async with client.aio.live.connect(
             model=MODEL, config=CONFIG
         ) as live_session:
-            print("Connected to Gemini. Start speaking!")
+            print("Connected to Gemini. Start speaking!\n> ", end="", flush=True)
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(send_realtime(live_session))
                 tg.create_task(listen_audio())

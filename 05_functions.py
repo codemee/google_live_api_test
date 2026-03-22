@@ -2,6 +2,7 @@ import asyncio
 import pyaudio
 from google import genai
 from dotenv import load_dotenv
+from typing import Callable
 # 搭配非同步機制讓使用者輸入提示
 from aioconsole import ainput
 
@@ -71,12 +72,12 @@ async def listen_audio():
             }
         )
 
-async def send_realtime(session):
+async def send_realtime(live_session):
     """從輸入音訊佇列取出資料送出"""
 
     while True:
         msg = await audio_queue_mic.get()
-        await session.send_realtime_input(audio=msg)
+        await live_session.send_realtime_input(audio=msg)
 
 async def play_audio():
     """從播放佇列取出音訊資料播放"""
@@ -93,13 +94,14 @@ async def play_audio():
         bytestream = await audio_queue_output.get()
         await asyncio.to_thread(stream.write, bytestream)
 
-async def input_loop(session: genai.live.AsyncSession):
+async def input_loop(live_session: genai.live.AsyncSession):
     while True:
         prompt = await ainput("")
-        await session.send_realtime_input(text=prompt)
+        await live_session.send_realtime_input(text=prompt)
 
-async def call_tool(
-    session: genai.live.AsyncSession, 
+async def call_tools(
+    functions: list[Callable[[dict], str]],
+    live_session: genai.live.AsyncSession, 
     tool_call: genai.types.ToolCall
 ):
     fn_responses = []
@@ -122,16 +124,20 @@ async def call_tool(
                 )
                 break
     if fn_responses:
-        await session.send_tool_response(
+        await live_session.send_tool_response(
             function_responses=fn_responses,
         )
     
-async def message_loop(session: genai.live.AsyncSession):
+async def message_loop(live_session: genai.live.AsyncSession):
     while True:
         text = ""
-        async for message in session.receive():
+        async for message in live_session.receive():
             if message.tool_call:
-                await call_tool(session, message.tool_call)
+                await call_tools(
+                    functions, 
+                    live_session, 
+                    message.tool_call
+                )
                 continue
 
             content = message.server_content
@@ -173,24 +179,24 @@ async def message_loop(session: genai.live.AsyncSession):
                 text = ""
 
 async def main():
-    async with client.aio.live.connect(
-        model=MODEL, config=CONFIG
-    ) as live_session:
-        print("已連線。\n> ", end="", flush=True)
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(message_loop(live_session))
-            tg.create_task(input_loop(live_session))
-            tg.create_task(play_audio())
-            tg.create_task(listen_audio())
-            tg.create_task(send_realtime(live_session))
-
-if __name__ == "__main__":
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
+        async with client.aio.live.connect(
+            model=MODEL, config=CONFIG
+        ) as live_session:
+            print("已連線。\n> ", end="", flush=True)
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(message_loop(live_session))
+                tg.create_task(input_loop(live_session))
+                tg.create_task(play_audio())
+                tg.create_task(listen_audio())
+                tg.create_task(send_realtime(live_session))
+    except asyncio.CancelledError:
         pass
     finally:
         if audio_stream:
             audio_stream.close()
         pya.terminate()
         print("\n\n程式結束")
+
+if __name__ == "__main__":
+    asyncio.run(main())

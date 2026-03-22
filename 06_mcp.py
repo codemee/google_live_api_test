@@ -5,9 +5,21 @@ from dotenv import load_dotenv
 # 搭配非同步機制讓使用者輸入提示
 from aioconsole import ainput
 
+from lib.city import get_current_city_name
+from lib.weather import get_feels_like_celsius
+
+from mcp_utils import load_mcp, call_tools, close_mcp
+
+mcp_sessions = []
+
 load_dotenv()
 
 client = genai.Client()
+
+functions = [ # 要當成工具的自訂函式
+    get_current_city_name,
+    get_feels_like_celsius,
+]
 
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 CONFIG = {
@@ -15,6 +27,7 @@ CONFIG = {
     "system_instruction": "使用繁體中文回答。",
     "output_audio_transcription": {}, # 取得生成語音的文字 
     "input_audio_transcription": {},  # 取得音訊輸入轉文字
+    "tools": functions + [{'google_search': {}}],
 }
 
 # 音訊格式
@@ -88,11 +101,20 @@ async def input_loop(live_session: genai.live.AsyncSession):
     while True:
         prompt = await ainput("")
         await live_session.send_realtime_input(text=prompt)
-
+    
 async def message_loop(live_session: genai.live.AsyncSession):
     while True:
         text = ""
         async for message in live_session.receive():
+            if message.tool_call:
+                await call_tools(
+                    functions, 
+                    mcp_sessions, 
+                    live_session, 
+                    message.tool_call
+                )
+                continue
+
             content = message.server_content
 
             if not content:
@@ -132,7 +154,10 @@ async def message_loop(live_session: genai.live.AsyncSession):
                 text = ""
 
 async def main():
+    global mcp_sessions
     try:
+        mcp_sessions = await load_mcp()
+        CONFIG["tools"] += mcp_sessions
         async with client.aio.live.connect(
             model=MODEL, config=CONFIG
         ) as live_session:
@@ -146,6 +171,7 @@ async def main():
     except asyncio.CancelledError:
         pass
     finally:
+        await close_mcp()
         if audio_stream:
             audio_stream.close()
         pya.terminate()

@@ -1,0 +1,36 @@
+{
+  "mcp_servers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ]
+    },
+    "openclaw Docs": {
+      "url": "https://gitmcp.io/openclaw/openclaw",
+      "sse_read_timeout": 600
+    },
+    "brave-search": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
+    },
+    "Brave Search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@brave/brave-search-mcp-server"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "<你的 API 金鑰>"
+      }
+    },
+    "Bitly": {
+      "type": "http",
+      "url": "https://api-ssl.bitly.com/v4/mcp",
+      "headers": {
+        "Authorization": "Bearer <你的存取權杖>"
+      }
+    }
+  }
+}

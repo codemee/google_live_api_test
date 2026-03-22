@@ -8,11 +8,17 @@ load_dotenv()
 
 client = genai.Client()
 
+# handle = None
+handle="CihybTViNHprYndpeDdheGs3czZpaWZyb2lmaW14YXV1M252bjBtdHo2"
+
 MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",
-    "output_audio_transcription": {}, # 取得生成語音的文字 
+    "output_audio_transcription": {}, # 取得生成語音的文字
+    "session_resumption" :{
+        "handle": handle
+    }
 }
 
 async def input_loop(live_session: genai.live.AsyncSession):
@@ -21,10 +27,20 @@ async def input_loop(live_session: genai.live.AsyncSession):
         await live_session.send_realtime_input(text=prompt)
 
 async def message_loop(live_session: genai.live.AsyncSession):
+    global handle
     while True:
         async for message in live_session.receive():
-            content = message.server_content
+            if message.go_away is not None:
+                print(f"即將斷線，剩餘時間：{message.go_away.time_left}")
+                continue
+            if message.session_resumption_update:
+                update = message.session_resumption_update
+                if update.resumable and update.new_handle:
+                    print(f"交談階段識別碼：{update.new_handle}")
+                    handle = update.new_handle
+                continue
 
+            content = message.server_content
             if not content:
                 continue
 
@@ -56,4 +72,11 @@ async def main():
         print("\n\n程式結束")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    while True:
+        try:
+            asyncio.run(main())
+        # except genai.errors.APIError as e:
+        except Exception as e:
+            print(f"程式錯誤：{e}")
+            continue
+        break

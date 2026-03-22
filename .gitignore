@@ -16,4 +16,4 @@ wheels/
 *.env
 
 # mcp config
-.mcp_servers.json
+mcp_servers.json

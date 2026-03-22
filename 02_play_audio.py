@@ -1,0 +1,96 @@
+import asyncio
+import pyaudio
+from google import genai
+from dotenv import load_dotenv
+# 搭配非同步機制讓使用者輸入提示
+from aioconsole import ainput
+
+load_dotenv()
+
+client = genai.Client()
+
+MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+CONFIG = {
+    "response_modalities": ["AUDIO"],
+    "system_instruction": "使用繁體中文回答。",
+    "output_audio_transcription": {}, # 取得生成語音的文字 
+}
+
+# 音訊格式
+FORMAT = pyaudio.paInt16     # 16 位元深度
+CHANNELS = 1                 # 單聲道
+RECEIVE_SAMPLE_RATE = 24000  # 輸出音訊取樣率 24KHz
+
+pya = pyaudio.PyAudio()
+audio_queue_output = asyncio.Queue() # 儲存播放音訊的佇列
+
+async def play_audio():
+    """從播放佇列取出音訊資料播放"""
+    
+    # 在單獨的執行緒中建立播放音訊的串流物件
+    stream = await asyncio.to_thread(
+        pya.open,
+        format=FORMAT,
+        channels=CHANNELS,
+        rate=RECEIVE_SAMPLE_RATE,
+        output=True,
+    )
+    while True:
+        bytestream = await audio_queue_output.get()
+        await asyncio.to_thread(stream.write, bytestream)
+
+async def input_loop(session: genai.live.AsyncSession):
+    while True:
+        prompt = await ainput("")
+        await session.send_realtime_input(text=prompt)
+
+async def message_loop(session: genai.live.AsyncSession):
+    while True:
+        async for message in session.receive():
+            content = message.server_content
+
+            if not content:
+                continue
+
+            if content.model_turn:
+                # 取得音訊資料的每個區塊並推入播放佇列
+                for part in content.model_turn.parts:
+                    if not part.inline_data:
+                        continue
+                    audio_input = part.inline_data.data
+                    audio_queue_output.put_nowait(audio_input)
+            elif content.output_transcription:
+                print(
+                    f"{content.output_transcription.text}", 
+                    end="", 
+                    flush=True
+                )            
+            elif (
+                content.generation_complete or # 完成生成
+                content.interrupted            # 中斷生成
+            ):
+                # 使用者插話，清空播放佇列中斷播放
+                if content.interrupted:
+                    while not audio_queue_output.empty():
+                        audio_queue_output.get_nowait()
+                # 顯示輸入提示符號，讓使用者可以繼續輸入
+                print("\n\n> ", end="", flush=True)
+
+async def main():
+    async with client.aio.live.connect(
+        model=MODEL, config=CONFIG
+    ) as live_session:
+        print("已連線。\n> ", end="", flush=True)
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(message_loop(live_session))
+            tg.create_task(input_loop(live_session))
+            tg.create_task(play_audio())
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        pya.terminate()
+        print("\n\n程式結束")

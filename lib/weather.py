@@ -2,36 +2,63 @@ import requests
 import json
 from urllib.parse import quote
 
-def get_feels_like_celsius(city: str):
+def get_city_geo_info(city: str):
     """
-    從 wttr.in 獲取指定城市的攝氏體感溫度。
-
-    發送 HTTP 請求到 wttr.in 的 API，解析回傳的 JSON 資料，
-    並提取目前的攝氏體感溫度。
+    透過 Open-Meteo 的地理編碼 API 獲取指定城市的經緯度資訊。
 
     Args:
         city (str): 城市的英文名稱。
 
     Returns:
-        str: 該城市目前的攝氏體感溫度（字串），如果獲取失敗則回傳錯誤訊息。
+        dict: 包含 'lat' (緯度) 和 'lon' (經度) 的字典，
+              如果找不到城市資訊則回傳 None。
     """
-    # 對城市名稱進行 URL 編碼，以處理空格或特殊字元
     encoded_city = quote(city)
-    url = f"https://wttr.in/{encoded_city}?format=j1"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # 如果請求失敗 (例如 4xx 或 5xx)，則會觸發 HTTPError
-        data = response.json()
+    geocode_url = (
+        f"https://geocoding-api.open-meteo.com/v1"
+        f"/search?name={encoded_city}&count=1&language=zh"
+    )
+    geo_resp = requests.get(geocode_url)
+    geo_data = geo_resp.json()
 
-        # 根據 wttr.in 的 JSON 結構，體感溫度通常在 current_condition[0] 之下
-        feels_like_c = data['data']['current_condition'][0]['FeelsLikeC']
-        return feels_like_c
-    except requests.exceptions.RequestException as e:
-        return f"獲取天氣資料時發生錯誤: {e}"
-    except (KeyError, IndexError) as e:
-        return f"解析天氣資料時發生錯誤，JSON 結構可能已改變: {e}"
-    except Exception as e:
-        return f"發生未知錯誤: {e}"
+    if geo_data.get('results', None):
+        lat = geo_data['results'][0]['latitude']
+        lon = geo_data['results'][0]['longitude']
+        return {
+            'lat': lat,
+            'lon': lon
+        }
+    return None
+
+def get_feels_like_celsius(city: str):
+    """
+    透過 Open-Meteo API 獲取指定城市的攝氏體趕溫度。
+
+    首先會透過地理編碼 API 獲取城市的經緯度，然後使用
+    這些經緯度查詢該城市的當前溫度。
+
+    Args:
+        city (str): 城市的英文名稱。
+
+    Returns:
+        str: 該城市目前的攝氏溫度（字串），
+             如果無法擷取溫度則回傳錯誤訊息。
+    """
+    geo_info = get_city_geo_info(city)
+    if geo_info:
+        weather_url = (
+            "https://api.open-meteo.com/v1/"
+            f"forecast?latitude={geo_info['lat']}&"
+            f"longitude={geo_info['lon']}"
+            "&current=apparent_temperature"
+            "&timezone=Asia/Taipei"
+        )
+        weather_resp = requests.get(weather_url)
+        weather_data = weather_resp.json()
+
+        current = weather_data['current']
+        return f"{current['apparent_temperature']}"
+    return "無法擷取溫度"
 
 if __name__ == "__main__":  
     # 範例使用：

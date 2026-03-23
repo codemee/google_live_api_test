@@ -97,9 +97,18 @@ async def play_audio():
         bytestream = await audio_queue_output.get()
         await asyncio.to_thread(stream.write, bytestream)
 
-async def input_loop(live_session: genai.live.AsyncSession):
+input_queue = asyncio.Queue()
+
+async def stdin_loop():
+    """全程式生命週期的 stdin 讀取 task，不隨連線重啟。"""
     while True:
         prompt = await ainput("")
+        await input_queue.put(prompt)
+
+async def send_loop(live_session: genai.live.AsyncSession):
+    """從共用 queue 取出輸入後送往伺服端。"""
+    while True:
+        prompt = await input_queue.get()
         await live_session.send_realtime_input(text=prompt)
     
 async def message_loop(live_session: genai.live.AsyncSession):
@@ -155,6 +164,8 @@ async def message_loop(live_session: genai.live.AsyncSession):
 
 async def main():
     global mcp_sessions
+    stdin_task = asyncio.create_task(stdin_loop())
+
     try:
         mcp_sessions = await load_mcp()
         CONFIG["tools"] += mcp_sessions
@@ -164,7 +175,7 @@ async def main():
             print("已連線。\n> ", end="", flush=True)
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(message_loop(live_session))
-                tg.create_task(input_loop(live_session))
+                tg.create_task(send_loop(live_session))
                 tg.create_task(play_audio())
                 tg.create_task(listen_audio())
                 tg.create_task(send_realtime(live_session))
@@ -175,6 +186,7 @@ async def main():
         if audio_stream:
             audio_stream.close()
         pya.terminate()
+        stdin_task.cancel()
         print("\n\n程式結束")
 
 if __name__ == "__main__":

@@ -5,15 +5,30 @@ from dotenv import load_dotenv
 # 搭配非同步機制讓使用者輸入提示
 from aioconsole import ainput
 
+from lib.city import get_current_city_name
+from lib.weather import get_feels_like_celsius
+
+from mcp_utils import load_mcp, call_tools, close_mcp
+
+mcp_sessions = []
+
 load_dotenv()
 
 client = genai.Client()
 
-MODEL = "gemini-3.1-flash-live-preview"
+functions = [ # 要當成工具的自訂函式
+    get_current_city_name,
+    get_feels_like_celsius,
+]
+
+MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",
     "output_audio_transcription": {}, # 取得生成語音的文字 
+    "input_audio_transcription": {},  # 取得音訊輸入轉文字
+    "tools": functions + [{'google_search': {}}],
+    "session_resumption" :{"handle": None}
 }
 
 # 音訊格式
@@ -24,8 +39,8 @@ SEND_SAMPLE_RATE = 16000     # 輸入音訊取樣率 16KHz
 CHUNK_SIZE = 1024            # 音訊區塊大小
 
 pya = pyaudio.PyAudio()
-audio_queue_output = asyncio.Queue() # 儲存播放音訊的佇列
-audio_queue_mic = asyncio.Queue()    # 儲存輸入音訊的佇列
+audio_queue_output = asyncio.Queue()       # 儲存播放音訊的佇列
+audio_queue_mic = asyncio.Queue(maxsize=5) # 儲存輸入音訊的佇列
 
 async def listen_audio():
     """收取語音輸入推入音訊佇列"""
@@ -59,12 +74,12 @@ async def listen_audio():
             }
         )
 
-async def send_realtime(session):
+async def send_realtime(live_session):
     """從輸入音訊佇列取出資料送出"""
 
     while True:
         msg = await audio_queue_mic.get()
-        await session.send_realtime_input(audio=msg)
+        await live_session.send_realtime_input(audio=msg)
 
 async def play_audio():
     """從播放佇列取出音訊資料播放"""
@@ -89,16 +104,36 @@ async def stdin_loop():
         prompt = await ainput("")
         await input_queue.put(prompt)
 
-
 async def send_loop(live_session: genai.live.AsyncSession):
     """從共用 queue 取出輸入後送往伺服端。"""
     while True:
         prompt = await input_queue.get()
         await live_session.send_realtime_input(text=prompt)
-
+    
 async def message_loop(live_session: genai.live.AsyncSession):
     while True:
+        text = ""
         async for message in live_session.receive():
+            if message.tool_call:
+                await call_tools(
+                    functions, 
+                    mcp_sessions, 
+                    live_session, 
+                    message.tool_call
+                )
+                continue
+            if message.session_resumption_update:
+                update = message.session_resumption_update
+                if update.resumable and update.new_handle:
+                    print(
+                        "交談階段識別碼："
+                        f"{update.new_handle}"
+                    )
+                    CONFIG["session_resumption"]["handle"] = (
+                        update.new_handle
+                    )
+                continue
+
             content = message.server_content
 
             if not content:
@@ -111,7 +146,15 @@ async def message_loop(live_session: genai.live.AsyncSession):
                         continue
                     audio_input = part.inline_data.data
                     audio_queue_output.put_nowait(audio_input)
-            if content.output_transcription:
+            elif content.input_transcription: # 音訊輸入轉文字
+                print(
+                    content.input_transcription.text,
+                    end="",
+                    flush=True
+                )
+            elif content.output_transcription:
+                if not text: print("\n") # 輸出生成內容前先換行
+                text += content.output_transcription.text
                 print(
                     f"{content.output_transcription.text}", 
                     end="", 
@@ -127,26 +170,38 @@ async def message_loop(live_session: genai.live.AsyncSession):
                         audio_queue_output.get_nowait()
                 # 顯示輸入提示符號，讓使用者可以繼續輸入
                 print("\n\n> ", end="", flush=True)
+                text = ""
 
 async def main():
+    global mcp_sessions
     stdin_task = asyncio.create_task(stdin_loop())
 
     try:
-        async with client.aio.live.connect(
-            model=MODEL, config=CONFIG
-        ) as live_session:
-            print("已連線。\n> ", end="", flush=True)
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(message_loop(live_session))
-                tg.create_task(send_loop(live_session))
-                tg.create_task(play_audio())
-                tg.create_task(listen_audio())
-                tg.create_task(send_realtime(live_session))
-    except asyncio.CancelledError:
-        pass
+        mcp_sessions = await load_mcp()
+        CONFIG["tools"] += mcp_sessions
+        while True:
+            try:
+                async with client.aio.live.connect(
+                    model=MODEL, config=CONFIG
+                ) as live_session:
+                    print("已連線。\n> ", end="", flush=True)
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(message_loop(live_session))
+                        tg.create_task(send_loop(live_session))
+                        tg.create_task(play_audio())
+                        tg.create_task(listen_audio())
+                        tg.create_task(send_realtime(live_session))
+            except ExceptionGroup as e:
+                print(f"強制斷線：{e.message}")
+                continue
+            except asyncio.CancelledError:
+                pass
+            finally:
+                print("\n\n程式結束")
+            break
     finally:
-        pya.terminate()
         stdin_task.cancel()
+        pya.terminate()
         print("\n\n程式結束")
 
 if __name__ == "__main__":

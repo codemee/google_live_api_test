@@ -18,13 +18,13 @@ functions = [ # 要當成工具的自訂函式
     get_feels_like_celsius,
 ]
 
-MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+MODEL = "gemini-3.1-flash-live-preview"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",
     "output_audio_transcription": {}, # 取得生成語音的文字 
     "input_audio_transcription": {},  # 取得音訊輸入轉文字
-    "tools": functions + [{'google_search': {}}],
+    "tools": functions + [{"google_search": {}}],
 }
 
 # 音訊格式
@@ -37,17 +37,15 @@ CHUNK_SIZE = 1024            # 音訊區塊大小
 pya = pyaudio.PyAudio()
 audio_queue_output = asyncio.Queue()       # 儲存播放音訊的佇列
 audio_queue_mic = asyncio.Queue(maxsize=5) # 儲存輸入音訊的佇列
-audio_stream = None
 
 async def listen_audio():
     """收取語音輸入推入音訊佇列"""
-    global audio_stream
     
     # 取得預設的輸入裝置資訊
     mic_info = pya.get_default_input_device_info()
     
     # 在單獨的執行緒中建立讀取語音輸入的串流物件
-    audio_stream = await asyncio.to_thread(
+    stream = await asyncio.to_thread(
         pya.open,
         format=FORMAT,
         channels=CHANNELS,
@@ -61,7 +59,7 @@ async def listen_audio():
     while True:
         # 讀取音訊資料
         data = await asyncio.to_thread(
-            audio_stream.read, 
+            stream.read, 
             CHUNK_SIZE, 
         )
         # 將讀取到的音訊資料推入輸入音訊佇列
@@ -112,7 +110,7 @@ async def send_loop(live_session: genai.live.AsyncSession):
 async def call_tools(
     functions: list[Callable[[dict], str]],
     live_session: genai.live.AsyncSession, 
-    tool_call: genai.types.ToolCall
+    tool_call: genai.types.LiveServerToolCall
 ):
     fn_responses = []
     # Live API 不支援自動叫用函式，因此需要手動叫用
@@ -128,7 +126,7 @@ async def call_tools(
                         id=fn.id,
                         name=fn_name,
                         response={
-                            "result": result,
+                            "output": result,
                         },
                     )
                 )
@@ -162,13 +160,13 @@ async def message_loop(live_session: genai.live.AsyncSession):
                         continue
                     audio_input = part.inline_data.data
                     audio_queue_output.put_nowait(audio_input)
-            elif content.input_transcription: # 音訊輸入轉文字
+            if content.input_transcription: # 音訊輸入轉文字
                 print(
                     content.input_transcription.text,
                     end="",
                     flush=True
                 )
-            elif content.output_transcription:
+            if content.output_transcription:
                 if not text: print("\n") # 輸出生成內容前先換行
                 text += content.output_transcription.text
                 print(
@@ -205,8 +203,6 @@ async def main():
     except asyncio.CancelledError:
         pass
     finally:
-        if audio_stream:
-            audio_stream.close()
         pya.terminate()
         stdin_task.cancel()
         print("\n\n程式結束")

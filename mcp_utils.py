@@ -193,7 +193,7 @@ async def call_tools(
                 id=fn.id,
                 name=fn_name,
                 response={
-                    "result": result,
+                    "output": result,
                 },
             )
         )

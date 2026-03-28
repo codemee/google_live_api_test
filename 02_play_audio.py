@@ -9,7 +9,7 @@ load_dotenv()
 
 client = genai.Client()
 
-MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+MODEL = "gemini-3.1-flash-live-preview"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",
@@ -69,7 +69,7 @@ async def message_loop(live_session: genai.live.AsyncSession):
                         continue
                     audio_input = part.inline_data.data
                     audio_queue_output.put_nowait(audio_input)
-            elif content.output_transcription:
+            if content.output_transcription:
                 print(
                     f"{content.output_transcription.text}", 
                     end="", 

@@ -8,7 +8,7 @@ load_dotenv()
 
 client = genai.Client()
 
-MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+MODEL = "gemini-3.1-flash-live-preview"
 CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",

@@ -13,9 +13,7 @@ CONFIG = {
     "response_modalities": ["AUDIO"],
     "system_instruction": "使用繁體中文回答。",
     "output_audio_transcription": {}, # 取得生成語音的文字
-    "session_resumption" :{
-        "handle": None
-    }
+    "session_resumption" :{"handle": None}
 }
 
 input_queue = asyncio.Queue()

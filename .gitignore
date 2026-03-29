@@ -17,3 +17,6 @@ wheels/
 
 # mcp config
 mcp_servers.json
+
+# memory
+memory.md

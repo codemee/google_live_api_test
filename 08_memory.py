@@ -1,3 +1,4 @@
+import os
 import asyncio
 import pyaudio
 from google import genai
@@ -179,6 +180,42 @@ async def message_loop(live_session: genai.live.AsyncSession):
                 print("\n\n> ", end="", flush=True)
                 text = ""
 
+async def save_session():
+    if CONFIG["session_resumption"]["handle"] is not None:
+        print("儲存會話中...")
+        try:
+            async with client.aio.live.connect(
+                model=MODEL, config=CONFIG
+            ) as live_session:
+                await live_session.send_realtime_input(
+                    text="摘要目前為止的對話內容"
+                )
+                summary = ""
+                async for message in live_session.receive():
+                    content = message.server_content
+                    if content and content.output_transcription:
+                        summary += content.output_transcription.text
+                print(summary)
+                with open(
+                    "memory.md", "w", encoding="utf-8"
+                ) as f:
+                    f.write(summary)
+                print("會話儲存完成")
+        except Exception as e:
+            print(f"儲存會話失敗：{e}")
+
+async def load_session(live_session: genai.live.AsyncSession):
+    if not os.path.exists("memory.md"):
+        return
+    with open("memory.md", "r", encoding="utf-8") as f:
+        memory = f.read()
+    if memory.strip():
+        await live_session.send_realtime_input(
+            text="以下是我們上次對話的摘要，"
+                 "請記住這些內容繼續對話，不要重述這些內容，"
+                 f"只要回答『我恢復記憶了』就好：\n\n{memory}"
+        )
+
 async def main():
     global mcp_sessions
     stdin_task = asyncio.create_task(stdin_loop())
@@ -191,12 +228,15 @@ async def main():
                 async with client.aio.live.connect(
                     model=MODEL, config=CONFIG
                 ) as live_session:
+                    await load_session(live_session)
                     print("已連線。\n> ", end="", flush=True)
                     async with asyncio.TaskGroup() as tg:
                         tg.create_task(
                             message_loop(live_session)
                         )
-                        tg.create_task(send_loop(live_session))
+                        tg.create_task(
+                            send_loop(live_session)
+                        )
                         tg.create_task(play_audio())
                         tg.create_task(listen_audio())
                         tg.create_task(
@@ -209,6 +249,7 @@ async def main():
                 pass
             break
     finally:
+        await save_session()
         stdin_task.cancel()
         await close_mcp()
         pya.terminate()

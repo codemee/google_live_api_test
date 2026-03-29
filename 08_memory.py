@@ -194,7 +194,9 @@ async def save_session():
                 async for message in live_session.receive():
                     content = message.server_content
                     if content and content.output_transcription:
-                        summary += content.output_transcription.text
+                        summary += (
+                            content.output_transcription.text
+                        )
                 print(summary)
                 with open(
                     "memory.md", "w", encoding="utf-8"

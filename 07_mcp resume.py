@@ -114,6 +114,13 @@ async def message_loop(live_session: genai.live.AsyncSession):
     while True:
         text = ""
         async for message in live_session.receive():
+            if message.go_away is not None:
+                print(
+                    "即將斷線，剩餘時間："
+                    f"{message.go_away.time_left}"
+                )
+                continue
+
             if message.tool_call:
                 await call_tools(
                     functions, 
@@ -186,21 +193,24 @@ async def main():
                 ) as live_session:
                     print("已連線。\n> ", end="", flush=True)
                     async with asyncio.TaskGroup() as tg:
-                        tg.create_task(message_loop(live_session))
+                        tg.create_task(
+                            message_loop(live_session)
+                        )
                         tg.create_task(send_loop(live_session))
                         tg.create_task(play_audio())
                         tg.create_task(listen_audio())
-                        tg.create_task(send_realtime(live_session))
+                        tg.create_task(
+                            send_realtime(live_session)
+                        )
             except ExceptionGroup as e:
                 print(f"強制斷線：{e.message}")
                 continue
             except asyncio.CancelledError:
                 pass
-            finally:
-                print("\n\n程式結束")
             break
     finally:
         stdin_task.cancel()
+        await close_mcp()
         pya.terminate()
         print("\n\n程式結束")
 

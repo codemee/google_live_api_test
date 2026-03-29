@@ -92,11 +92,10 @@ async def main():
                 continue
             except asyncio.CancelledError:
                 pass
-            finally:
-                print("\n\n程式結束")
             break
     finally:
         stdin_task.cancel()
+        print("\n\n程式結束")
 
 if __name__ == "__main__":
     asyncio.run(main())
